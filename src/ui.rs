@@ -3,9 +3,10 @@ use std::time::Duration;
 
 use gpui::{
     Action, AnyElement, AnyView, App, Context, Div, ElementId, Entity, FocusHandle, FontWeight,
-    IntoElement, KeyContext, KeyDownEvent, MouseButton, Render, Rgba, ScrollHandle, ScrollStrategy,
-    SharedString, Stateful, Subscription, Task, UniformListScrollHandle, Window, WindowAppearance,
-    actions, div, prelude::*, px, rgb, rgba, svg, uniform_list,
+    HighlightStyle, IntoElement, KeyContext, KeyDownEvent, MouseButton, Render, Rgba, ScrollHandle,
+    ScrollStrategy, SharedString, Stateful, StyledText, Subscription, Task,
+    UniformListScrollHandle, Window, WindowAppearance, actions, div, prelude::*, px, rgb, rgba,
+    svg, uniform_list,
 };
 
 use crate::db::Thread;
@@ -1018,6 +1019,7 @@ impl Render for Deck {
             .child(self.header(th, cx))
             .when(self.tab == Tab::Tasks, |d| d.child(self.tasks_bar(th, cx)))
             .child(body)
+            .children(current.as_deref().map(|t| preview(t, th)))
             .child(self.action_bar(current.as_deref(), window, th));
 
         let palette = self
@@ -1056,8 +1058,22 @@ impl Render for Tip {
             .shadow_md()
             .text_xs()
             .text_color(th.fg)
-            .child(self.label.clone())
+            .child(div().max_w(px(460.)).child(self.label.clone()))
             .children(self.keys.iter().map(|k| kbd(k.clone(), th)))
+    }
+}
+
+/// Plain text tooltip, wrapped, e.g. the full latest comment.
+fn text_tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView {
+    let text = SharedString::from(text);
+    move |window, cx| {
+        let th = Theme::of(window);
+        cx.new(|_| Tip {
+            label: text.clone(),
+            keys: Vec::new(),
+            th,
+        })
+        .into()
     }
 }
 
@@ -1210,12 +1226,16 @@ fn row(
     let (status, color) = status_icon(t, th);
     let tracked = t.stage.is_some();
     let open = view.clone();
+    // Hover actions float over the right edge instead of reserving a column.
     let buttons = div()
+        .absolute()
+        .right(px(8.))
+        .top(px((ROW_H - 28.) / 2.))
         .flex()
-        .flex_none()
-        .justify_end()
-        .w(px(4. * 24. + 3. * 2.))
         .gap(px(2.))
+        .p(px(2.))
+        .rounded(px(6.))
+        .bg(if selected { th.sel } else { th.hover })
         .opacity(0.)
         .group_hover("row", |s| s.opacity(1.))
         .when(t.unread, |d| {
@@ -1261,9 +1281,77 @@ fn row(
             th,
         ));
 
+    // Your own repos are always yours; the owner prefix only costs space.
+    let repo = if t.mine {
+        t.repo.rsplit('/').next().unwrap_or(&t.repo)
+    } else {
+        &t.repo
+    };
+    let event = t.event.clone().filter(|e| !e.is_empty());
+    let (author, text) = match event.as_deref().and_then(|e| e.split_once(": ")) {
+        Some((who, text)) => (Some(who.to_owned()), text.to_owned()),
+        None => (
+            None,
+            event.clone().unwrap_or_else(|| t.reason.replace('_', " ")),
+        ),
+    };
+
+    let title_line = div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .text_sm()
+                .truncate()
+                .text_color(if t.unread { th.fg } else { th.mute })
+                .when(t.unread, |d| d.font_weight(FontWeight::MEDIUM))
+                .child(t.title.clone()),
+        )
+        // Fixed widths so columns line up whether or not a row is tracked.
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_3()
+                .w(px(TASK_COL_W))
+                .when(tracked, |d| d.child(priority_icon(t.priority, th)))
+                .children(progress(t, th)),
+        )
+        .child(
+            div()
+                .w(px(36.))
+                .flex_none()
+                .text_right()
+                .text_xs()
+                .text_color(th.mute)
+                .child(time::parse(&t.updated).map(time::ago).unwrap_or_default()),
+        );
+
+    // The comment line runs the full row width; hovering it shows the whole comment.
+    let meta_line = div()
+        .id(("meta", ix))
+        .flex()
+        .gap_2()
+        .text_xs()
+        .text_color(th.mute)
+        .child(div().flex_none().child(repo.to_owned()))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .truncate()
+                .child(comment(author, text, th)),
+        )
+        .when_some(event, |d, e| d.tooltip(text_tip(e)));
+
     div()
         .id(ix)
         .group("row")
+        .relative()
         .w_full()
         .h(px(ROW_H))
         .px_3()
@@ -1297,52 +1385,53 @@ fn row(
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .child(
-                    div()
-                        .text_sm()
-                        .truncate()
-                        .text_color(if t.unread { th.fg } else { th.mute })
-                        .when(t.unread, |d| d.font_weight(FontWeight::MEDIUM))
-                        .child(t.title.clone()),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .text_xs()
-                        .text_color(th.mute)
-                        .child(div().flex_none().child(t.repo.clone()))
-                        .child(
-                            div().min_w(px(0.)).truncate().child(
-                                t.event
-                                    .clone()
-                                    .filter(|e| !e.is_empty())
-                                    .unwrap_or_else(|| t.reason.replace('_', " ")),
-                            ),
-                        ),
-                ),
-        )
-        // Fixed width so columns line up whether or not a row is tracked.
-        .child(
-            div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap_3()
-                .w(px(TASK_COL_W))
-                .when(tracked, |d| d.child(priority_icon(t.priority, th)))
-                .children(progress(t, th)),
-        )
-        .child(
-            div()
-                .w(px(36.))
-                .flex_none()
-                .text_right()
-                .text_xs()
-                .text_color(th.mute)
-                .child(time::parse(&t.updated).map(time::ago).unwrap_or_default()),
+                .child(title_line)
+                .child(meta_line),
         )
         .child(buttons)
+}
+
+const PREVIEW_LINES: usize = 3;
+
+/// Full latest comment of the selected thread, so long comments don't need a hover.
+/// Fixed height keeps the list from jumping as the selection moves.
+fn preview(t: &Thread, th: Theme) -> Div {
+    let event = t.event.clone().filter(|e| !e.is_empty());
+    let (author, text) = match event.as_deref().and_then(|e| e.split_once(": ")) {
+        Some((who, text)) => (Some(who.to_owned()), text.to_owned()),
+        None => (
+            None,
+            event.unwrap_or_else(|| format!("No comments yet - {}", t.reason.replace('_', " "))),
+        ),
+    };
+    div()
+        .flex_none()
+        .h(px(PREVIEW_LINES as f32 * 18. + 16.))
+        .px_3()
+        .py_2()
+        .border_t_1()
+        .border_color(th.line)
+        .text_xs()
+        .line_height(px(18.))
+        .text_color(th.mute)
+        .child(
+            div()
+                .line_clamp(PREVIEW_LINES)
+                .child(comment(author, text, th)),
+        )
+}
+
+/// "author: text" as one truncating line, with the author a little brighter.
+fn comment(author: Option<String>, text: String, th: Theme) -> StyledText {
+    let Some(author) = author else {
+        return StyledText::new(text);
+    };
+    let full = format!("{author}: {text}");
+    let highlight = HighlightStyle {
+        color: Some(th.fg.into()),
+        ..Default::default()
+    };
+    StyledText::new(full).with_highlights([(0..author.len() + 1, highlight)])
 }
 
 /// Linear-style: urgent is a filled square with "!", the rest are 1-3 signal bars.

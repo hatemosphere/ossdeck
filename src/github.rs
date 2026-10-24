@@ -423,7 +423,7 @@ fn last_comment(node: &Value, me: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    let text: String = text.chars().take(160).collect();
+    let text: String = text.chars().take(600).collect();
     if text.is_empty() {
         format!("{who} reviewed")
     } else {
