@@ -117,6 +117,7 @@ fn tray_cmd(cmd: TrayCmd, cx: &mut App) {
     match cmd {
         TrayCmd::Open => show_window(cx),
         TrayCmd::Sync => store(cx).update(cx, |s, cx| s.sync(true, cx)),
+        TrayCmd::ToggleLogin => toggle_login(cx),
         TrayCmd::Quit => cx.quit(),
         TrayCmd::Thread(id) => {
             let store = store(cx);
@@ -242,6 +243,13 @@ fn menus(cx: &mut App) {
     }]);
 }
 
+fn toggle_login(cx: &mut App) {
+    if let Err(e) = mac::set_login(!mac::login_enabled()) {
+        eprintln!("launch at login: {e}");
+    }
+    menus(cx);
+}
+
 fn set_interval(secs: u64, cx: &mut App) {
     store(cx).update(cx, |s, cx| s.set_interval(secs, cx));
     menus(cx);
@@ -273,12 +281,7 @@ fn main() {
 
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &Refresh, cx| store(cx).update(cx, |s, cx| s.sync(true, cx)));
-        cx.on_action(|_: &ToggleLogin, cx| {
-            if let Err(e) = mac::set_login(!mac::login_enabled()) {
-                eprintln!("launch at login: {e}");
-            }
-            menus(cx);
-        });
+        cx.on_action(|_: &ToggleLogin, cx| toggle_login(cx));
         cx.on_action(|_: &ToggleOpenRead, cx| {
             store(cx).update(cx, |s, cx| s.toggle_open_marks_read(cx));
             menus(cx);

@@ -8,8 +8,9 @@ use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication,
-    NSApplicationActivationPolicy, NSCellImagePosition, NSImage, NSMenu, NSMenuItem, NSStatusBar,
-    NSStatusItem, NSVariableStatusItemLength,
+    NSApplicationActivationPolicy, NSCellImagePosition, NSControlStateValueOff,
+    NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSStatusBar, NSStatusItem,
+    NSVariableStatusItemLength,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSBundle, NSData, NSError, NSObject, NSObjectProtocol, NSSize,
@@ -119,9 +120,13 @@ pub fn set_login(on: bool) -> Result<(), String> {
 pub enum TrayCmd {
     Open,
     Sync,
+    ToggleLogin,
     Quit,
     Thread(String),
 }
+
+/// Tag of the "Launch at Login" item, so its checkmark can be refreshed when the menu opens.
+const LOGIN_TAG: isize = 1;
 
 struct TargetIvars {
     tx: UnboundedSender<TrayCmd>,
@@ -136,6 +141,20 @@ define_class!(
 
     unsafe impl NSObjectProtocol for Target {}
 
+    /// Login state can change outside the app (System Settings), so read it on every open.
+    unsafe impl NSMenuDelegate for Target {
+        #[unsafe(method(menuNeedsUpdate:))]
+        fn menu_needs_update(&self, menu: &NSMenu) {
+            if let Some(item) = menu.itemWithTag(LOGIN_TAG) {
+                item.setState(if login_enabled() {
+                    NSControlStateValueOn
+                } else {
+                    NSControlStateValueOff
+                });
+            }
+        }
+    }
+
     impl Target {
         #[unsafe(method(open:))]
         fn open(&self, _sender: Option<&AnyObject>) {
@@ -145,6 +164,11 @@ define_class!(
         #[unsafe(method(sync:))]
         fn sync(&self, _sender: Option<&AnyObject>) {
             self.send(TrayCmd::Sync);
+        }
+
+        #[unsafe(method(login:))]
+        fn login(&self, _sender: Option<&AnyObject>) {
+            self.send(TrayCmd::ToggleLogin);
         }
 
         #[unsafe(method(quit:))]
@@ -280,7 +304,10 @@ impl Tray {
         add("Open ossdeck", Some(sel!(open:)), "o");
         add("Sync Now", Some(sel!(sync:)), "r");
         menu.addItem(&NSMenuItem::separatorItem(mtm));
+        add("Launch at Login", Some(sel!(login:)), "").setTag(LOGIN_TAG);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
         add("Quit ossdeck", Some(sel!(quit:)), "q");
+        menu.setDelegate(Some(ProtocolObject::from_ref(&*self.target)));
         self.item.setMenu(Some(&menu));
     }
 }
