@@ -73,7 +73,9 @@ pub fn init_notifications() {
     std::mem::forget(delegate);
     let handler = RcBlock::new(|_granted: Bool, _err: *mut NSError| {});
     center.requestAuthorizationWithOptions_completionHandler(
-        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+        UNAuthorizationOptions::Alert
+            | UNAuthorizationOptions::Sound
+            | UNAuthorizationOptions::Badge,
         &handler,
     );
 }
