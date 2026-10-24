@@ -1,5 +1,6 @@
 -- Mock data for README screenshots. Repos outside hatemosphere/* and all people are made up.
 DELETE FROM threads; DELETE FROM tasks; DELETE FROM authored;
+INSERT OR REPLACE INTO kv (k, v) VALUES ('me', 'hatemosphere'), ('admin_orgs', '["acme-db","orbit-labs","tidewater"]'), ('mine_orgs', '["orbit-labs"]');
 
 INSERT INTO threads (id, key, repo, kind, title, url, reason, updated, unread, mine, done, state, event) VALUES
 ('1', 'hatemosphere/pulumi-hcloudplus#41', 'hatemosphere/pulumi-hcloudplus', 'PullRequest', 'feat: support placement groups in server resource', 'https://github.com/hatemosphere/pulumi-hcloudplus/pull/41', 'comment', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-12 minutes'), 1, 1, 0, 'open', '@kvoss: rebased on main and addressed the review: placement group ids are now validated before create, and the import test covers the spread type. Ready for another look'),

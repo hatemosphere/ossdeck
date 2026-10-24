@@ -88,6 +88,28 @@ pub fn open() -> Result<Connection> {
     Ok(c)
 }
 
+/// A JSON string list stored in kv, empty when missing.
+pub fn get_list(c: &Connection, k: &str) -> Result<Vec<String>> {
+    Ok(get(c, k)?
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default())
+}
+
+/// Owners whose repos count as "mine": you, plus orgs you opted in.
+pub fn mine_owners(c: &Connection) -> Result<Vec<String>> {
+    let mut owners = get_list(c, "mine_orgs")?;
+    owners.extend(get(c, "me")?);
+    Ok(owners.into_iter().map(|o| o.to_lowercase()).collect())
+}
+
+pub fn recompute_mine(c: &Connection) -> Result<()> {
+    c.execute(
+        "UPDATE threads SET mine = lower(substr(repo, 1, instr(repo, '/') - 1)) IN (SELECT value FROM json_each(?))",
+        [serde_json::to_string(&mine_owners(c)?)?],
+    )?;
+    Ok(())
+}
+
 pub fn get(c: &Connection, k: &str) -> Result<Option<String>> {
     Ok(
         c.query_row("SELECT v FROM kv WHERE k = ?", [k], |r| r.get(0))

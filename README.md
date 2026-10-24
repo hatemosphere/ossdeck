@@ -23,18 +23,20 @@
     <td width="45%">
       <h3>One inbox, only open source</h3>
       Notifications from your public repos plus upstream threads you take part in: authored, commented, mentioned, review requested. Private and watch-only repos stay out.<br><br>
-      GitHub-style status icons and the latest comment on every row. Toggle <kbd>U</kbd> to include read threads.
+      GitHub-style status icons and the latest comment on every row; the selected thread's full comment shows in a strip above the action bar. Toggle <kbd>U</kbd> to include read threads.
     </td>
     <td><img src="docs/screenshots/all.png" width="420" alt="All threads"></td>
   </tr>
   <tr>
     <td>
       <h3>Mine vs Upstream</h3>
-      Your repos on one tab, PRs and issues you sent elsewhere on another. Switch with <kbd>1</kbd>-<kbd>4</kbd>.
+      Your repos on one tab, PRs and issues you sent elsewhere on another. Switch with <kbd>1</kbd>-<kbd>4</kbd>.<br><br>
+      Admin of an org? Opt it in from the palette ("Choose orgs that count as Mine") and everything from its repos you watch lands in Mine too.
     </td>
     <td>
       <img src="docs/screenshots/mine.png" width="420" alt="Mine"><br>
-      <img src="docs/screenshots/upstream.png" width="420" alt="Upstream">
+      <img src="docs/screenshots/upstream.png" width="420" alt="Upstream"><br>
+      <img src="docs/screenshots/orgs.png" width="420" alt="Org picker">
     </td>
   </tr>
   <tr>

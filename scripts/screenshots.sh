@@ -15,7 +15,7 @@ sleep 3
 kill "$pid"
 sqlite3 "$db" < scripts/demo.sql
 
-for view in inbox all mine upstream tasks palette priority interval; do
+for view in inbox all mine upstream tasks palette priority interval orgs; do
   OSSDECK_DEMO="$db" OSSDECK_VIEW="$view" "$bin" & pid=$!
   sleep 3
   screencapture -x -o -l"$(swift scripts/window-id.swift "$pid")" "$out/$view.png"

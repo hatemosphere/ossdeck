@@ -210,6 +210,28 @@ impl Github {
         Ok(Some((notes, first.last_modified)))
     }
 
+    /// Orgs where you can admin or maintain public repos; you pick which count as "mine".
+    fn refresh_admin_orgs(&self, c: &Connection) -> Result<()> {
+        let mut orgs = std::collections::BTreeSet::new();
+        let mut path = Some(
+            "user/repos?affiliation=organization_member,collaborator&visibility=public&per_page=100".to_owned(),
+        );
+        while let Some(p) = path.take() {
+            let r = self.get(&p, None)?;
+            for repo in r.body.as_array().into_iter().flatten() {
+                let perms = &repo["permissions"];
+                if (perms["admin"] == true || perms["maintain"] == true)
+                    && let Some(owner) = repo["owner"]["login"].as_str()
+                    && !owner.eq_ignore_ascii_case(&self.me)
+                {
+                    orgs.insert(owner.to_owned());
+                }
+            }
+            path = r.link.as_deref().and_then(next_page);
+        }
+        db::set(c, "admin_orgs", &serde_json::to_string(&orgs)?)
+    }
+
     fn refresh_authored(&self, c: &Connection) -> Result<()> {
         let since = &time::iso(time::now() - HISTORY_DAYS * 86_400)[..10];
         let q = format!("author:{0} is:public -user:{0} updated:>={since}", self.me);
@@ -330,10 +352,15 @@ pub fn sync(gh: &Github, c: &Connection, force: bool) -> Result<Vec<db::Thread>>
     // History is re-imported when HISTORY_DAYS changes.
     let seed = format!("{HISTORY_DAYS}d");
     let seeded = db::get(c, "seeded")?.as_deref() == Some(seed.as_str());
+    db::set(c, "me", &gh.me)?;
+    if force || !seeded || older("orgs_at", 3600)? {
+        gh.refresh_admin_orgs(c)?;
+        db::set(c, "orgs_at", &now.to_string())?;
+    }
     if !seeded {
         let since = time::iso(now - HISTORY_DAYS * 86_400);
         if let Some((notes, _)) = gh.notifications(c, &format!("all=true&since={since}"), None)? {
-            store(c, &gh.me, &notes)?;
+            store(c, &notes)?;
         }
     }
     let mut fresh = Vec::new();
@@ -348,10 +375,7 @@ pub fn sync(gh: &Github, c: &Connection, force: bool) -> Result<Vec<db::Thread>>
     let lm = if full { None } else { db::get(c, "unread_lm")? };
     let unread = gh.notifications(c, "all=false", lm.as_deref())?;
     if let Some((notes, last_modified)) = &unread {
-        fresh = store(c, &gh.me, notes)?
-            .iter()
-            .map(|n| n.id.clone())
-            .collect();
+        fresh = store(c, notes)?.iter().map(|n| n.id.clone()).collect();
         let ids: Vec<&str> = notes.iter().map(|n| n.id.as_str()).collect();
         c.execute(
             "UPDATE threads SET unread = 0 WHERE unread = 1 AND id NOT IN (SELECT value FROM json_each(?))",
@@ -432,7 +456,8 @@ fn last_comment(node: &Value, me: &str) -> String {
 }
 
 /// Stores public notifications; returns those that are new or updated and unread.
-fn store<'a>(c: &Connection, me: &str, notes: &'a [Note]) -> Result<Vec<&'a Note>> {
+fn store<'a>(c: &Connection, notes: &'a [Note]) -> Result<Vec<&'a Note>> {
+    let owners = db::mine_owners(c)?;
     let tx = c.unchecked_transaction()?;
     let mut fresh = Vec::new();
     for n in notes.iter().filter(|n| !n.repository.private) {
@@ -448,7 +473,7 @@ fn store<'a>(c: &Connection, me: &str, notes: &'a [Note]) -> Result<Vec<&'a Note
                 reason: &n.reason,
                 updated: &n.updated_at,
                 unread: n.unread,
-                mine: n.repository.owner.login.eq_ignore_ascii_case(me),
+                mine: owners.contains(&n.repository.owner.login.to_lowercase()),
             },
         )?;
         if changed && n.unread {
@@ -511,6 +536,14 @@ fn html_url(n: &Note) -> String {
         "Discussion" => format!("{repo}/discussions"),
         _ => repo.clone(),
     }
+}
+
+fn next_page(link: &str) -> Option<String> {
+    let part = link.split(',').find(|p| p.contains("rel=\"next\""))?;
+    part.split(['<', '>'])
+        .nth(1)?
+        .strip_prefix(API)
+        .map(str::to_owned)
 }
 
 fn last_page(link: &str) -> Option<u32> {

@@ -46,7 +46,8 @@ actions!(
         PickPriority,
         PickInterval,
         ToggleOpenRead,
-        CloseWindow
+        CloseWindow,
+        PickOrgs
     ]
 );
 
@@ -177,6 +178,7 @@ enum Mode {
     Commands,
     Priority,
     Interval,
+    Orgs,
 }
 
 pub fn interval_action(ix: usize) -> Box<dyn Action> {
@@ -207,6 +209,8 @@ struct Palette {
 struct Cmd {
     label: SharedString,
     action: Box<dyn Action>,
+    /// Org picker entries toggle this org instead of running `action`, and keep the palette open.
+    org: Option<String>,
     icon: Option<AnyElement>,
     keys: Vec<SharedString>,
 }
@@ -269,6 +273,7 @@ impl Deck {
                 deck.open_palette(Mode::Priority, window, cx);
             }
             Ok("interval") => deck.open_palette(Mode::Interval, window, cx),
+            Ok("orgs") => deck.open_palette(Mode::Orgs, window, cx),
             _ => {}
         }
         deck
@@ -386,6 +391,18 @@ impl Deck {
         cx.notify();
     }
 
+    fn toggle_org(&mut self, org: &str, cx: &mut Context<Self>) {
+        self.store.update(cx, |s, cx| s.toggle_mine_org(org, cx));
+        cx.notify();
+    }
+
+    fn pick(&mut self, c: Cmd, window: &mut Window, cx: &mut Context<Self>) {
+        match &c.org {
+            Some(org) => self.toggle_org(org, cx),
+            None => self.run(c.action, window, cx),
+        }
+    }
+
     /// Palette entries run the same actions as the hotkeys and buttons.
     fn run(&mut self, action: Box<dyn Action>, window: &mut Window, cx: &mut Context<Self>) {
         self.close_palette(window, cx);
@@ -405,7 +422,28 @@ impl Deck {
                     .into_any_element()
             }),
             action,
+            org: None,
         };
+        if mode == Mode::Orgs {
+            let store = self.store.read(cx);
+            return store
+                .admin_orgs
+                .iter()
+                .map(|org| Cmd {
+                    label: org.clone().into(),
+                    action: Box::new(PickOrgs),
+                    org: Some(org.clone()),
+                    icon: store.mine_orgs.contains(org).then(|| {
+                        svg()
+                            .path("icons/check.svg")
+                            .size(px(14.))
+                            .text_color(th.accent)
+                            .into_any_element()
+                    }),
+                    keys: Vec::new(),
+                })
+                .collect();
+        }
         if mode == Mode::Interval {
             let current = self.store.read(cx).interval;
             return INTERVALS
@@ -414,6 +452,7 @@ impl Deck {
                 .map(|(i, &(secs, label))| Cmd {
                     label: format!("Every {label}").into(),
                     action: interval_action(i),
+                    org: None,
                     icon: (secs == current).then(|| {
                         svg()
                             .path("icons/check.svg")
@@ -430,6 +469,7 @@ impl Deck {
                 .map(|p| Cmd {
                     label: PRIORITIES[p as usize].into(),
                     action: priority_action(p),
+                    org: None,
                     icon: Some(priority_icon(p, th).into_any_element()),
                     keys: vec![p.to_string().into()],
                 })
@@ -515,6 +555,12 @@ impl Deck {
             Box::new(ToggleOpenRead),
             None,
         ));
+        let picked = self.store.read(cx).mine_orgs.len();
+        v.push(cmd(
+            &format!("Choose orgs that count as Mine ({picked} picked)..."),
+            Box::new(PickOrgs),
+            None,
+        ));
         v.push(cmd("Toggle launch at login", Box::new(ToggleLogin), None));
         v.push(cmd("Quit ossdeck", Box::new(Quit), None));
         v
@@ -548,7 +594,7 @@ impl Deck {
             "enter" => {
                 let ix = p.selected;
                 if let Some(c) = self.filtered(window, cx).into_iter().nth(ix) {
-                    self.run(c.action, window, cx);
+                    self.pick(c, window, cx);
                 }
                 return;
             }
@@ -796,17 +842,24 @@ impl Deck {
                 .current(cx)
                 .map(|t| format!("Set priority - {}", t.title)),
             Mode::Commands => self.current(cx).map(|t| t.title.clone()),
+            Mode::Orgs => Some(if self.store.read(cx).admin_orgs.is_empty() {
+                "No orgs where you can admin public repos (refreshed hourly).".to_owned()
+            } else {
+                "Orgs you admin. In ticked ones, all notifications from repos you watch count as Mine."
+                    .to_owned()
+            }),
         };
         let placeholder = match p.mode {
             Mode::Commands => "Type a command...",
             Mode::Priority => "Pick a priority, or press 0-4...",
             Mode::Interval => "Pick an interval, or press 1-4...",
+            Mode::Orgs => "Toggle orgs with enter...",
         };
         let items: Vec<_> = cmds
             .into_iter()
             .enumerate()
             .map(|(ix, c)| {
-                let action = c.action;
+                let (action, org) = (c.action, c.org);
                 div()
                     .id(("cmd", ix))
                     .flex()
@@ -820,8 +873,9 @@ impl Deck {
                     .text_sm()
                     .when(ix == selected, |d| d.bg(th.sel))
                     .when(ix != selected, |d| d.hover(|s| s.bg(th.hover)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.run(action.boxed_clone(), window, cx)
+                    .on_click(cx.listener(move |this, _, window, cx| match &org {
+                        Some(org) => this.toggle_org(org, cx),
+                        None => this.run(action.boxed_clone(), window, cx),
                     }))
                     .child(
                         div()
@@ -970,9 +1024,10 @@ impl Render for Deck {
                 .into_any_element()
         } else {
             let (view, selected) = (cx.entity(), self.selected);
+            let me = self.store.read(cx).me.clone();
             uniform_list("threads", rows.len(), move |range, _, _| {
                 range
-                    .map(|ix| row(&rows[ix], ix, ix == selected, th, view.clone()))
+                    .map(|ix| row(&rows[ix], ix, ix == selected, th, view.clone(), &me))
                     .collect()
             })
             .track_scroll(self.scroll.clone())
@@ -1009,6 +1064,9 @@ impl Render for Deck {
             }))
             .on_action(cx.listener(|this, _: &PickPriority, window, cx| {
                 this.open_palette(Mode::Priority, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PickOrgs, window, cx| {
+                this.open_palette(Mode::Orgs, window, cx)
             }))
             .on_action(cx.listener(|this, _: &PickInterval, window, cx| {
                 this.open_palette(Mode::Interval, window, cx)
@@ -1222,6 +1280,7 @@ fn row(
     selected: bool,
     th: Theme,
     view: Entity<Deck>,
+    me: &str,
 ) -> impl IntoElement + use<> {
     let (status, color) = status_icon(t, th);
     let tracked = t.stage.is_some();
@@ -1281,11 +1340,10 @@ fn row(
             th,
         ));
 
-    // Your own repos are always yours; the owner prefix only costs space.
-    let repo = if t.mine {
-        t.repo.rsplit('/').next().unwrap_or(&t.repo)
-    } else {
-        &t.repo
+    // The owner prefix only costs space on your own repos.
+    let repo = match t.repo.split_once('/') {
+        Some((owner, name)) if owner.eq_ignore_ascii_case(me) => name,
+        _ => &t.repo,
     };
     let event = t.event.clone().filter(|e| !e.is_empty());
     let (author, text) = match event.as_deref().and_then(|e| e.split_once(": ")) {

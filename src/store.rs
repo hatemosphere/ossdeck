@@ -31,6 +31,10 @@ pub struct Store {
     pub next_at: Option<i64>,
     /// Off by default: opening a thread leaves it unread so it stays in the Unread view.
     pub open_marks_read: bool,
+    pub me: String,
+    /// Orgs you can admin, and the ones you opted in as "mine".
+    pub admin_orgs: Vec<String>,
+    pub mine_orgs: Vec<String>,
     poll: Task<()>,
 }
 
@@ -53,6 +57,9 @@ impl Store {
                 interval,
                 next_at: db::demo().map(|_| time::now() + 180),
                 open_marks_read,
+                me: String::new(),
+                admin_orgs: Vec::new(),
+                mine_orgs: Vec::new(),
                 poll: if db::demo().is_some() {
                     Task::ready(())
                 } else {
@@ -104,7 +111,27 @@ impl Store {
         cx.notify();
     }
 
+    pub fn toggle_mine_org(&mut self, org: &str, cx: &mut Context<Self>) {
+        if let Some(i) = self.mine_orgs.iter().position(|o| o == org) {
+            self.mine_orgs.remove(i);
+        } else {
+            self.mine_orgs.push(org.to_owned());
+        }
+        let saved = serde_json::to_string(&self.mine_orgs)
+            .map_err(anyhow::Error::from)
+            .and_then(|v| db::set(&self.db, "mine_orgs", &v))
+            .and_then(|_| db::recompute_mine(&self.db));
+        if let Err(e) = saved {
+            self.error = Some(format!("{e:#}"));
+        }
+        self.reload();
+        cx.notify();
+    }
+
     fn reload(&mut self) {
+        self.me = db::get(&self.db, "me").ok().flatten().unwrap_or_default();
+        self.admin_orgs = db::get_list(&self.db, "admin_orgs").unwrap_or_default();
+        self.mine_orgs = db::get_list(&self.db, "mine_orgs").unwrap_or_default();
         match db::load(&self.db, None) {
             Ok(rows) => self.rows = rows.into_iter().map(Rc::new).collect(),
             Err(e) => {
