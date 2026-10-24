@@ -7,11 +7,13 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSCellImagePosition, NSImage, NSMenu, NSMenuItem,
-    NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication,
+    NSApplicationActivationPolicy, NSCellImagePosition, NSImage, NSMenu, NSMenuItem, NSStatusBar,
+    NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{
-    MainThreadMarker, NSBundle, NSData, NSError, NSObject, NSObjectProtocol, NSSize, NSString,
+    MainThreadMarker, NSArray, NSBundle, NSData, NSError, NSObject, NSObjectProtocol, NSSize,
+    NSString,
 };
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use objc2_user_notifications::{
@@ -167,27 +169,46 @@ impl Target {
 }
 
 const MENUBAR_PNG: &[u8] = include_bytes!("../assets/icon/menubar.png");
+const MENUBAR_UNREAD_LIGHT_PNG: &[u8] = include_bytes!("../assets/icon/menubar-unread-light.png");
+const MENUBAR_UNREAD_DARK_PNG: &[u8] = include_bytes!("../assets/icon/menubar-unread-dark.png");
+
+/// Template images follow the menu bar colour automatically but can't carry colour, so the
+/// blue-dot variants come in a light and a dark version.
+fn menubar_image(png: &[u8], template: bool) -> Option<Retained<NSImage>> {
+    let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(png))?;
+    image.setSize(NSSize::new(18., 18.));
+    image.setTemplate(template);
+    Some(image)
+}
 
 /// Menu bar item with the unread count and a menu of the latest unread threads; also sets the Dock badge.
 pub struct Tray {
     item: Retained<NSStatusItem>,
     target: Retained<Target>,
     mtm: MainThreadMarker,
+    icon: Retained<NSImage>,
+    unread_light: Retained<NSImage>,
+    unread_dark: Retained<NSImage>,
 }
 
 impl Tray {
     pub fn new(tx: UnboundedSender<TrayCmd>) -> Option<Self> {
         let mtm = MainThreadMarker::new()?;
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
-        let button = item.button(mtm)?;
-        let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(MENUBAR_PNG))?;
-        image.setSize(NSSize::new(18., 18.));
-        image.setTemplate(true);
-        button.setImage(Some(&image));
-        button.setImagePosition(NSCellImagePosition::ImageLeft);
+        let icon = menubar_image(MENUBAR_PNG, true)?;
+        item.button(mtm)?.setImage(Some(&icon));
+        item.button(mtm)?
+            .setImagePosition(NSCellImagePosition::ImageLeft);
         let target = Target::alloc(mtm).set_ivars(TargetIvars { tx });
         let target: Retained<Target> = unsafe { msg_send![super(target), init] };
-        Some(Self { item, target, mtm })
+        Some(Self {
+            item,
+            target,
+            mtm,
+            icon,
+            unread_light: menubar_image(MENUBAR_UNREAD_LIGHT_PNG, false)?,
+            unread_dark: menubar_image(MENUBAR_UNREAD_DARK_PNG, false)?,
+        })
     }
 
     /// `status` is the sync state line; `threads` is (id, label) for the newest unread threads.
@@ -200,6 +221,22 @@ impl Tray {
                 String::new()
             };
             button.setTitle(&NSString::from_str(&title));
+            let image = if unread == 0 {
+                &self.icon
+            } else {
+                let names = NSArray::from_slice(&[unsafe { NSAppearanceNameAqua }, unsafe {
+                    NSAppearanceNameDarkAqua
+                }]);
+                let best = button
+                    .effectiveAppearance()
+                    .bestMatchFromAppearancesWithNames(&names);
+                if best.is_some_and(|n| n.isEqualToString(unsafe { NSAppearanceNameDarkAqua })) {
+                    &self.unread_dark
+                } else {
+                    &self.unread_light
+                }
+            };
+            button.setImage(Some(image));
         }
         let badge = (unread > 0).then(|| NSString::from_str(&unread.to_string()));
         NSApplication::sharedApplication(mtm)

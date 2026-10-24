@@ -48,9 +48,14 @@ pub fn data_dir() -> PathBuf {
         .join("Library/Application Support/ossdeck")
 }
 
+/// `OSSDECK_DEMO=<db path>` runs on a mock database with syncing off (used for screenshots).
+pub fn demo() -> Option<PathBuf> {
+    std::env::var_os("OSSDECK_DEMO").map(PathBuf::from)
+}
+
 pub fn open() -> Result<Connection> {
     std::fs::create_dir_all(data_dir())?;
-    let c = Connection::open(data_dir().join("ossdeck.db"))?;
+    let c = Connection::open(demo().unwrap_or_else(|| data_dir().join("ossdeck.db")))?;
     c.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;

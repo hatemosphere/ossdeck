@@ -52,6 +52,8 @@ actions!(
 const ROW_H: f32 = 48.;
 /// Room for the macOS window buttons, which sit inside the header.
 pub const TRAFFIC_LIGHTS_W: f32 = 78.;
+/// Priority icon + stage bars + stage label.
+const TASK_COL_W: f32 = 14. + 12. + 3. * 10. + 2. * 4. + 4. + 88.;
 
 #[derive(Clone, Copy)]
 struct Theme {
@@ -232,7 +234,7 @@ impl Deck {
             cx.observe(&store, |_, _, cx| cx.notify()),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
         ];
-        Self {
+        let mut deck = Self {
             store,
             tab: Tab::Inbox,
             unread_only: true,
@@ -253,7 +255,22 @@ impl Deck {
                     }
                 }
             }),
+        };
+        // Starting view for README screenshots, e.g. OSSDECK_VIEW=tasks or OSSDECK_VIEW=palette.
+        match std::env::var("OSSDECK_VIEW").as_deref() {
+            Ok("all") => deck.unread_only = false,
+            Ok("mine") => deck.tab = Tab::Mine,
+            Ok("upstream") => deck.tab = Tab::Upstream,
+            Ok("tasks") => deck.tab = Tab::Tasks,
+            Ok("palette") => deck.open_palette(Mode::Commands, window, cx),
+            Ok("priority") => {
+                deck.tab = Tab::Tasks;
+                deck.open_palette(Mode::Priority, window, cx);
+            }
+            Ok("interval") => deck.open_palette(Mode::Interval, window, cx),
+            _ => {}
         }
+        deck
     }
 
     fn visible(&self, cx: &App) -> Vec<Rc<Thread>> {
@@ -596,6 +613,8 @@ impl Deck {
             let on = tab == self.tab;
             div()
                 .id(name)
+                .flex_none()
+                .whitespace_nowrap()
                 .px_2()
                 .py_1()
                 .rounded(px(6.))
@@ -621,35 +640,15 @@ impl Deck {
             .h(px(40.))
             .border_b_1()
             .border_color(th.line)
-            .child(drag_area().w(px(TRAFFIC_LIGHTS_W)))
+            .child(drag_area().flex_none().w(px(TRAFFIC_LIGHTS_W)))
             .children(tabs)
             .child(drag_area().flex_1())
-            .when(self.tab == Tab::Tasks, |d| {
-                let filter = self
-                    .priority_filter
-                    .map_or("Any priority", |p| PRIORITIES[p as usize]);
-                d.child(
-                    chip("filter", filter, th)
-                        .tooltip(tip("Filter by priority", Box::new(CycleFilter)))
-                        .on_click(cx.listener(|this, _, _, cx| this.cycle_filter(cx))),
-                )
-                .child(
-                    chip(
-                        "sort",
-                        if self.by_priority {
-                            "By priority"
-                        } else {
-                            "By recent"
-                        },
-                        th,
-                    )
-                    .tooltip(tip("Change sort", Box::new(ToggleSort)))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_sort(cx))),
-                )
-            })
             .child(
                 div()
                     .id("sync-status")
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -687,6 +686,45 @@ impl Deck {
                 chip("scope", if self.unread_only { "Unread" } else { "All" }, th)
                     .tooltip(tip("Toggle unread only", Box::new(ToggleUnread)))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_unread(cx))),
+            )
+    }
+
+    /// Filter and sort for the Tasks tab, in its own row so the header never overflows.
+    fn tasks_bar(&self, th: Theme, cx: &mut Context<Self>) -> Div {
+        let filter = self
+            .priority_filter
+            .map_or("Any priority", |p| PRIORITIES[p as usize]);
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .h(px(36.))
+            .border_b_1()
+            .border_color(th.line)
+            .text_xs()
+            .text_color(th.mute)
+            .child("Priority")
+            .child(
+                chip("filter", filter, th)
+                    .tooltip(tip("Filter by priority", Box::new(CycleFilter)))
+                    .on_click(cx.listener(|this, _, _, cx| this.cycle_filter(cx))),
+            )
+            .child(div().w(px(8.)))
+            .child("Sort")
+            .child(
+                chip(
+                    "sort",
+                    if self.by_priority {
+                        "By priority"
+                    } else {
+                        "By recent"
+                    },
+                    th,
+                )
+                .tooltip(tip("Change sort", Box::new(ToggleSort)))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_sort(cx))),
             )
     }
 
@@ -978,6 +1016,7 @@ impl Render for Deck {
             .flex()
             .flex_col()
             .child(self.header(th, cx))
+            .when(self.tab == Tab::Tasks, |d| d.child(self.tasks_bar(th, cx)))
             .child(body)
             .child(self.action_bar(current.as_deref(), window, th));
 
@@ -1140,6 +1179,8 @@ fn row_button(
 fn chip(id: &'static str, label: &'static str, th: Theme) -> Stateful<Div> {
     div()
         .id(id)
+        .flex_none()
+        .whitespace_nowrap()
         .px_2()
         .py_1()
         .rounded(px(6.))
@@ -1172,6 +1213,8 @@ fn row(
     let buttons = div()
         .flex()
         .flex_none()
+        .justify_end()
+        .w(px(4. * 24. + 3. * 2.))
         .gap(px(2.))
         .opacity(0.)
         .group_hover("row", |s| s.opacity(1.))
@@ -1279,12 +1322,22 @@ fn row(
                         ),
                 ),
         )
-        .when(tracked, |d| d.child(priority_icon(t.priority, th)))
-        .children(progress(t, th))
+        // Fixed width so columns line up whether or not a row is tracked.
         .child(
             div()
-                .w(px(32.))
+                .flex()
                 .flex_none()
+                .items_center()
+                .gap_3()
+                .w(px(TASK_COL_W))
+                .when(tracked, |d| d.child(priority_icon(t.priority, th)))
+                .children(progress(t, th)),
+        )
+        .child(
+            div()
+                .w(px(36.))
+                .flex_none()
+                .text_right()
                 .text_xs()
                 .text_color(th.mute)
                 .child(time::parse(&t.updated).map(time::ago).unwrap_or_default()),
@@ -1404,7 +1457,8 @@ fn progress(t: &Thread, th: Theme) -> Option<Div> {
             }))
             .child(
                 div()
-                    .w(px(70.))
+                    .w(px(84.))
+                    .whitespace_nowrap()
                     .pl_1()
                     .text_xs()
                     .text_color(color)

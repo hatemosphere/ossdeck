@@ -48,12 +48,16 @@ impl Store {
                 gh: None,
                 rows: Vec::new(),
                 syncing: false,
-                synced_at: None,
+                synced_at: db::demo().map(|_| time::now() - 120),
                 error: None,
                 interval,
-                next_at: None,
+                next_at: db::demo().map(|_| time::now() + 180),
                 open_marks_read,
-                poll: Self::poll(cx),
+                poll: if db::demo().is_some() {
+                    Task::ready(())
+                } else {
+                    Self::poll(cx)
+                },
             };
             store.reload();
             store

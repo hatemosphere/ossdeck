@@ -252,7 +252,9 @@ fn main() {
     // Closing the window keeps syncing in the background; the dock icon reopens it.
     app.on_reopen(show_window);
     app.run(|cx: &mut App| {
-        mac::init_notifications();
+        if db::demo().is_none() {
+            mac::init_notifications();
+        }
         let entity = match Store::new(cx) {
             Ok(s) => s,
             Err(e) => {
