@@ -262,11 +262,11 @@ impl Store {
         cx.notify();
     }
 
-    pub fn step_task(&mut self, id: &str, cx: &mut Context<Self>) {
-        self.local(
-            "UPDATE tasks SET stage = (stage + 1) % 3 WHERE id = ?",
-            id,
-            cx,
-        );
+    pub fn set_stage(&mut self, id: &str, stage: u8, cx: &mut Context<Self>) {
+        self.db
+            .execute("UPDATE tasks SET stage = ?2 WHERE id = ?1", (id, stage))
+            .ok();
+        self.reload();
+        cx.notify();
     }
 }

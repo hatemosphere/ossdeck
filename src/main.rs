@@ -26,6 +26,7 @@ macro_rules! icons {
 }
 
 const ICONS: &[(&str, &[u8])] = icons!(
+    "archive",
     "bell",
     "check",
     "command-palette",
@@ -303,7 +304,7 @@ fn main() {
             KeyBinding::new("o", Open, deck),
             KeyBinding::new("enter", Open, deck),
             KeyBinding::new("r", MarkRead, deck),
-            KeyBinding::new("e", MarkDone, deck),
+            KeyBinding::new("e", Archive, deck),
             KeyBinding::new("t", ToggleTask, deck),
             KeyBinding::new("s", StepTask, deck),
             KeyBinding::new("u", ToggleUnread, deck),

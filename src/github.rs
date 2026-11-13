@@ -424,7 +424,7 @@ pub fn describe(t: &db::Thread) -> String {
     }
 }
 
-const NODE: &str = "author{login} bodyText createdAt";
+const NODE: &str = "author{login} bodyText createdAt state";
 const LAST: &str = "comments(last:1){nodes{author{login} bodyText createdAt}}";
 
 /// Latest comment or review as "@who: text"; empty when there is none.
@@ -449,7 +449,14 @@ fn last_comment(node: &Value, me: &str) -> String {
         .join(" ");
     let text: String = text.chars().take(600).collect();
     if text.is_empty() {
-        format!("{who} reviewed")
+        // Reviews can be bodyless; comments always have text.
+        match c["state"].as_str() {
+            Some("APPROVED") => format!("{who} approved"),
+            Some("CHANGES_REQUESTED") => format!("{who} requested changes"),
+            Some("COMMENTED") => format!("{who} left review comments"),
+            Some("DISMISSED") => format!("{who} reviewed (dismissed)"),
+            _ => format!("{who} reviewed"),
+        }
     } else {
         format!("{who}: {text}")
     }

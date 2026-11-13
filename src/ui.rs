@@ -27,7 +27,7 @@ actions!(
         SelectPrev,
         Open,
         MarkRead,
-        MarkDone,
+        Archive,
         ToggleTask,
         StepTask,
         ToggleUnread,
@@ -52,6 +52,7 @@ actions!(
 );
 
 const ROW_H: f32 = 48.;
+const ARCHIVE_TIP: &str = "Archive until new activity";
 /// Room for the macOS window buttons, which sit inside the header.
 pub const TRAFFIC_LIGHTS_W: f32 = 78.;
 /// Priority icon + stage bars + stage label.
@@ -491,9 +492,9 @@ impl Deck {
                 ));
             }
             v.push(cmd(
-                "Mark as done",
-                Box::new(MarkDone),
-                Some("icons/check.svg"),
+                ARCHIVE_TIP,
+                Box::new(Archive),
+                Some("icons/archive.svg"),
             ));
             v.push(cmd(
                 if tracked {
@@ -504,9 +505,9 @@ impl Deck {
                 Box::new(ToggleTask),
                 Some("icons/tasklist.svg"),
             ));
-            if tracked {
+            if let Some(next) = next_stage(&t) {
                 v.push(cmd(
-                    "Move task to next stage",
+                    &format!("Move task to {}", stages(&t)[next as usize]),
                     Box::new(StepTask),
                     Some("icons/tasklist.svg"),
                 ));
@@ -784,7 +785,13 @@ impl Deck {
             if t.unread {
                 left.push(button("a-read", "Read", Box::new(MarkRead), window, th));
             }
-            left.push(button("a-done", "Done", Box::new(MarkDone), window, th));
+            left.push(button(
+                "a-archive",
+                "Archive",
+                Box::new(Archive),
+                window,
+                th,
+            ));
             left.push(button(
                 "a-track",
                 if tracked { "Untrack" } else { "Track" },
@@ -792,10 +799,10 @@ impl Deck {
                 window,
                 th,
             ));
-            if tracked {
+            if let Some(next) = next_stage(t) {
                 left.push(button(
                     "a-step",
-                    "Next stage",
+                    format!("-> {}", stages(t)[next as usize]),
                     Box::new(StepTask),
                     window,
                     th,
@@ -1043,9 +1050,13 @@ impl Render for Deck {
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(|this, _: &Open, _, cx| this.open(this.selected, cx)))
             .on_action(cx.listener(|this, _: &MarkRead, _, cx| this.act(cx, Store::mark_read)))
-            .on_action(cx.listener(|this, _: &MarkDone, _, cx| this.act(cx, Store::mark_done)))
+            .on_action(cx.listener(|this, _: &Archive, _, cx| this.act(cx, Store::mark_done)))
             .on_action(cx.listener(|this, _: &ToggleTask, _, cx| this.act(cx, Store::toggle_task)))
-            .on_action(cx.listener(|this, _: &StepTask, _, cx| this.act(cx, Store::step_task)))
+            .on_action(cx.listener(|this, _: &StepTask, _, cx| {
+                if let Some(next) = this.current(cx).and_then(|t| next_stage(&t)) {
+                    this.act(cx, |s, id, cx| s.set_stage(id, next, cx));
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleUnread, _, cx| this.toggle_unread(cx)))
             .on_action(cx.listener(|this, _: &TabInbox, _, cx| this.set_tab(Tab::Inbox, cx)))
             .on_action(cx.listener(|this, _: &TabMine, _, cx| this.set_tab(Tab::Mine, cx)))
@@ -1195,7 +1206,7 @@ fn hint(keys: &[&'static str], label: &'static str, th: Theme) -> Div {
 /// Text button that shows its shortcut inline, Raycast/Linear style.
 fn button(
     id: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     action: Box<dyn Action>,
     window: &Window,
     th: Theme,
@@ -1214,7 +1225,7 @@ fn button(
         .text_xs()
         .text_color(th.fg)
         .hover(|s| s.bg(th.hover))
-        .child(label)
+        .child(label.into())
         .children(keys.into_iter().map(|k| kbd(k, th)))
         .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
 }
@@ -1331,10 +1342,10 @@ fn row(
             th,
         ))
         .child(row_button(
-            ("rb-done", ix),
-            icon("icons/check.svg", th),
-            "Mark as done",
-            Box::new(MarkDone),
+            ("rb-archive", ix),
+            icon("icons/archive.svg", th),
+            ARCHIVE_TIP,
+            Box::new(Archive),
             ix,
             view,
             th,
@@ -1564,15 +1575,30 @@ fn stages(t: &Thread) -> [&'static str; 3] {
     }
 }
 
-/// The last stage comes from GitHub's PR/issue state.
+/// PR and issue tasks only reach their last stage through GitHub's state.
+fn from_github(t: &Thread) -> bool {
+    matches!(t.kind.as_str(), "PullRequest" | "Issue")
+}
+
 fn final_stage(t: &Thread) -> Option<&'static str> {
     match (t.kind.as_str(), t.state.as_deref()) {
         (_, Some("merged")) => Some("merged"),
         ("PullRequest", Some("closed")) => Some("closed"),
         (_, Some("not_planned")) => Some("not planned"),
         (_, Some("closed")) => Some(stages(t)[2]),
-        _ => (t.stage == Some(2)).then(|| stages(t)[2]),
+        _ => (t.stage == Some(2) && !from_github(t)).then(|| stages(t)[2]),
     }
+}
+
+/// Stage the "next stage" action moves a task to, wrapping back to the first; None once
+/// GitHub has closed it.
+fn next_stage(t: &Thread) -> Option<u8> {
+    let stage = t.stage?;
+    if from_github(t) && final_stage(t).is_some() {
+        return None;
+    }
+    let last = if from_github(t) { 1 } else { 2 };
+    Some(if stage >= last { 0 } else { stage + 1 })
 }
 
 fn progress(t: &Thread, th: Theme) -> Option<Div> {

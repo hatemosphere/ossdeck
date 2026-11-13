@@ -70,7 +70,7 @@
   <tr>
     <td>
       <h3>Sync that respects GitHub</h3>
-      Background sync every 1-30 minutes (GitHub's 60s poll interval is the floor), free conditional requests, parallel paging, octocrab-style retries. Read and done sync back to your GitHub inbox.
+      Background sync every 1-30 minutes (GitHub's 60s poll interval is the floor), free conditional requests, parallel paging, octocrab-style retries. Read and archive sync back to your GitHub inbox.
     </td>
     <td><img src="docs/screenshots/interval.png" width="420" alt="Sync interval picker"></td>
   </tr>
@@ -94,7 +94,7 @@
 | <kbd>J</kbd> / <kbd>K</kbd> | Move | <kbd>T</kbd> | Track / untrack task |
 | <kbd>&#8629;</kbd> / <kbd>O</kbd> | Open in browser | <kbd>S</kbd> | Next task stage |
 | <kbd>R</kbd> | Mark read | <kbd>P</kbd> | Set priority |
-| <kbd>E</kbd> | Mark done | <kbd>F</kbd> / <kbd>&#8679;</kbd><kbd>S</kbd> | Filter / sort tasks |
+| <kbd>E</kbd> | Archive | <kbd>F</kbd> / <kbd>&#8679;</kbd><kbd>S</kbd> | Filter / sort tasks |
 | <kbd>U</kbd> | Unread only / all | <kbd>I</kbd> | Sync interval |
 | <kbd>1</kbd>-<kbd>4</kbd> | Tabs | <kbd>&#8984;</kbd><kbd>R</kbd> | Sync now |
 | <kbd>&#8984;</kbd><kbd>K</kbd> | Command palette | <kbd>&#8984;</kbd><kbd>W</kbd> | Close window |
